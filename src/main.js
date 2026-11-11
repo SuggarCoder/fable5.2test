@@ -14,10 +14,16 @@ const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const canvas = document.getElementById('c');
 const idxEl = document.getElementById('idx');
 
-const [P, gltf] = await Promise.all([
+// Textures baked in Blender: the card as Cycles lights it (open), how that light fades inside the slot
+// between cards (lut), the card under its own edge light (glow), and the tileable veins (frost).
+const TEX_NAMES = ['open_front', 'open_end', 'open_top', 'lut_front', 'lut_far', 'lut_end', 'lut_top', 'lut_top_back', 'glow_front', 'glow_end', 'glow_top', 'frost'];
+const texLoader = new THREE.TextureLoader();
+const [P, gltf, ...texList] = await Promise.all([
   fetch('assets/params.json').then((r) => r.json()),
   new GLTFLoader().loadAsync('assets/card.glb'),
+  ...TEX_NAMES.map((n) => texLoader.loadAsync(`assets/tex/${n}.png`)),
 ]);
+const tex = Object.fromEntries(TEX_NAMES.map((n, k) => [n, texList[k]]));
 
 // ----------------------------------------------------------------------------- layout
 // Blender (x, y, z)  ->  three (x, z, -y):  x = card length, y = up, -z = stacking axis
@@ -70,10 +76,21 @@ function glowAt(i, j, fi, fj) {
 
 // ----------------------------------------------------------------------------- renderer
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.0;
+renderer.toneMapping = THREE.NeutralToneMapping;        // same highlight roll-off as Blender's Khronos PBR Neutral view
 
-const HAZE = new THREE.Color(1.0, 0.975, 0.945);
+for (const [name, t] of Object.entries(tex)) {
+  if (name === 'frost') {
+    t.colorSpace = THREE.NoColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  } else {
+    t.colorSpace = THREE.SRGBColorSpace;
+    if (name.startsWith('lut')) { t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; }
+    else t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  }
+  t.needsUpdate = true;
+}
+
+const HAZE = new THREE.Color(...P.haze.color);
 const scene = new THREE.Scene();
 scene.background = HAZE;
 
@@ -105,14 +122,26 @@ controls.maxAzimuthAngle = homeSph.theta + 0.55;
 controls.update();
 
 // ----------------------------------------------------------------------------- cards
+const M = P.material, BK = P.bake;
 const uniforms = {
-  uKeyDir: { value: b2t([-13, 9, 13]).normalize() },
-  uKeyColor: { value: new THREE.Color(1.0, 0.965, 0.92).multiplyScalar(0.32) },
-  uSkyColor: { value: new THREE.Color(1.0, 0.97, 0.94).multiplyScalar(0.76) },
-  uHazeColor: { value: HAZE },
-  uHaze: { value: new THREE.Vector2(K.distance - 0.5, 8.5) },
+  tOpenFront: { value: tex.open_front }, tOpenEnd: { value: tex.open_end }, tOpenTop: { value: tex.open_top },
+  tLutFront: { value: tex.lut_front }, tLutFar: { value: tex.lut_far }, tLutEnd: { value: tex.lut_end }, tLutTop: { value: tex.lut_top }, tLutTopBack: { value: tex.lut_top_back },
+  tGlowFront: { value: tex.glow_front }, tGlowEnd: { value: tex.glow_end }, tGlowTop: { value: tex.glow_top },
+  tFrost: { value: tex.frost },
   uDims: { value: new THREE.Vector3(L, H, T) },
-  uGaps: { value: new THREE.Vector2(PITCH - T, ROW_PITCH - L) },
+  uLut: { value: new THREE.Vector4(BK.stepRaise, BK.topRange[0], BK.topRange[1], BK.lutScale) },
+  uOpenGain: { value: 1 / BK.openScale },
+  uVeinDark: { value: new THREE.Vector3(...M.veinDark) },
+  uVeinLight: { value: new THREE.Vector3(...M.veinLight) },
+  uVeinAcross: { value: M.veinAcross },
+  uVeinGain: { value: P.app.veinGain },
+  uGlowColor: { value: new THREE.Vector3(...M.glow) },
+  uGlowGain: { value: new THREE.Vector2(P.app.glowGain / BK.glowScale, P.app.spillGain) },
+  uSpot: { value: new THREE.Vector4(0, 0, P.app.spotRadius, P.spot.gain * P.app.spotGain) },
+  uSpotColor: { value: new THREE.Vector3(...P.spot.color).multiplyScalar(1.04) },
+  uSpotDir: { value: b2t(P.spot.from).normalize() },
+  uHazeColor: { value: HAZE },
+  uHaze: { value: new THREE.Vector3(K.distance + P.haze.start, P.haze.depth, P.haze.base) },
 };
 
 const matrices = new THREE.InstancedBufferAttribute(new Float32Array(COUNT * 16), 16).setUsage(THREE.DynamicDrawUsage);
@@ -128,7 +157,7 @@ for (let i = R0; i <= R1; i++) {
   }
 }
 
-const MAT_INDEX = { Acrylic: 0, Core: 1, Metal: 2, Rivet: 3 };
+const MAT_INDEX = { Acrylic: 0, Rivet: 1 };
 gltf.scene.traverse((src) => {
   if (!src.isMesh) return;
   const geometry = src.geometry;
@@ -147,7 +176,7 @@ gltf.scene.traverse((src) => {
 });
 
 // warm floor: any sliver seen between cards reads as light, never as a void
-const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshBasicMaterial({ color: new THREE.Color(1.0, 0.72, 0.46) }));
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshBasicMaterial({ color: new THREE.Color(0.62, 0.36, 0.17) }));
 floor.rotation.x = -Math.PI / 2;
 floor.position.y = -0.05;
 scene.add(floor);
@@ -180,14 +209,14 @@ class SceneDofPass extends Pass {
 }
 const composer = new EffectComposer(renderer);
 const dofPass = new SceneDofPass();
-const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.3, 0.8, 0.9);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), P.app.bloom, 0.8, 0.9);
 composer.addPass(dofPass);
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
 
 // The image is soft by design (depth of field), so cap the shaded pixel count instead of following the
 // device pixel ratio blindly; the budget shrinks further if the GPU cannot hold the frame rate.
-let pixelBudget = 3.2e6;
+let pixelBudget = 5.5e6;
 function resize() {
   const w = innerWidth, h = innerHeight, aspect = w / h;
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2, Math.sqrt(pixelBudget / (w * h))));
@@ -338,6 +367,8 @@ function update(dt) {
     if (resetAnim.t >= 1) resetAnim = null;
   }
   controls.update();
+  uniforms.uSpot.value.x = focus.i * ROW_PITCH + P.spot.offset[0];
+  uniforms.uSpot.value.y = -(focus.j * PITCH + P.spot.offset[1]);
 
   // focus the lens where the Blender camera does: a couple of cards in front of the pulled-out one
   const [fr, fc] = K.focusCard;

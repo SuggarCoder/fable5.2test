@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "blender": "blender -b -P blender/build_scene.py"
+    "blender": "blender -b -P blender/build_scene.py",
+    "bake": "blender -b -P blender/build_scene.py -- --bake"
   },
   "dependencies": {
     "three": "^0.170.0"
