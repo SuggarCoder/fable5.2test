@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Acrylic Card Field</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #f3ede6; }
+    canvas#c { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: pointer; }
+    canvas#c.dragging { cursor: grabbing; }
+    .hud {
+      position: fixed; inset: auto 0 0 0; display: flex; justify-content: space-between; align-items: flex-end;
+      padding: 0 28px 22px; pointer-events: none; user-select: none;
+      font: 12px/1.8 "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      letter-spacing: .12em; color: #8d7a64;
+    }
+    .hud b { display: block; font-weight: 600; font-size: 13px; letter-spacing: .3em; color: #6a5a48; }
+    .hud .index { text-align: right; font-variant-numeric: tabular-nums; }
+    .hud .index b { font-size: 20px; letter-spacing: .08em; font-weight: 300; }
+    #loading {
+      position: fixed; inset: 0; display: grid; place-items: center; background: #f3ede6; color: #8d7a64;
+      font: 12px "Segoe UI", system-ui, sans-serif; letter-spacing: .3em; transition: opacity .8s ease;
+    }
+    #loading.done { opacity: 0; pointer-events: none; }
+    @media (max-width: 640px) { .hud { padding: 0 16px 14px; } .hud .keys { display: none; } }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div class="hud">
+    <div>
+      <b>ACRYLIC FIELD</b>
+      <span class="keys">悬停 — 抬起卡片 · 点击 — 抽出并点亮 · 拖拽 — 旋转 · 滚轮 — 缩放 · 方向键 — 移动焦点 · R — 复位</span>
+    </div>
+    <div class="index"><b id="idx">00 · 000</b>ROW · CARD</div>
+  </div>
+  <div id="loading">LOADING</div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
